@@ -93,7 +93,7 @@
      * Require a Z Min pin
      */
     #if Z_MIN_PIN == -1
-      #if Z_PROBE_PIN == -1
+      #if Z_PROBE_PIN == -1 || (! defined (Z_PROBE_ENDSTOP) || defined (DISABLE_Z_PROBE_ENDSTOP)) // It's possible for someone to set a pin for the Z Probe, but not enable it.
         #ifdef Z_PROBE_REPEATABILITY_TEST
           #error You must have a Z_MIN or Z_PROBE endstop to enable Z_PROBE_REPEATABILITY_TEST.
         #else
@@ -124,7 +124,7 @@
 //      #endif
 //      #ifndef SERVO_ENDSTOP_ANGLES
 //        #error You must have SERVO_ENDSTOP_ANGLES defined for Z Extend and Retract to use Z_PROBE_AND_ENSTOP
-      #endif
+//      #endif
     #endif
     /**
      * Check if Probe_Offset * Grid Points is greater than Probing Range
