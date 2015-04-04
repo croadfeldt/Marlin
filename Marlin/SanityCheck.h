@@ -56,7 +56,7 @@
   #if EXTRUDERS > 1
 
     #if EXTRUDERS > 4
-      #error The maximum number of EXTRUDERS is 4.
+      #error The maximum number of EXTRUDERS in Marlin is 4.
     #endif
 
     #ifdef TEMP_SENSOR_1_AS_REDUNDANT
@@ -78,6 +78,13 @@
   #endif // EXTRUDERS > 1
 
   /**
+   * Limited number of servos
+   */
+  #if NUM_SERVOS > 4
+    #error The maximum number of SERVOS in Marlin is 4.
+  #endif
+
+  /**
    * Required LCD language
    */
   #if !defined(DOGLCD) && defined(ULTRA_LCD) && !defined(DISPLAY_CHARSET_HD44780_JAPAN) && !defined(DISPLAY_CHARSET_HD44780_WESTERN)
@@ -93,7 +100,7 @@
      * Require a Z Min pin
      */
     #if Z_MIN_PIN == -1
-      #if Z_PROBE_PIN == -1 || (! defined (Z_PROBE_ENDSTOP) || defined (DISABLE_Z_PROBE_ENDSTOP)) // It's possible for someone to set a pin for the Z Probe, but not enable it.
+      #if Z_PROBE_PIN == -1 || (!defined(Z_PROBE_ENDSTOP) || defined(DISABLE_Z_PROBE_ENDSTOP)) // It's possible for someone to set a pin for the Z Probe, but not enable it.
         #ifdef Z_PROBE_REPEATABILITY_TEST
           #error You must have a Z_MIN or Z_PROBE endstop to enable Z_PROBE_REPEATABILITY_TEST.
         #else
@@ -235,9 +242,9 @@
    */
   #ifdef DUAL_X_CARRIAGE
     #if EXTRUDERS == 1 || defined(COREXY) \
-        || !defined(X2_ENABLE_PIN) || !defined(X2_STEP_PIN) || !defined(X2_DIR_PIN) \
+        || !HAS_X2_ENABLE || !HAS_X2_STEP || !HAS_X2_DIR \
         || !defined(X2_HOME_POS) || !defined(X2_MIN_POS) || !defined(X2_MAX_POS) \
-        || !defined(X_MAX_PIN) || X_MAX_PIN < 0
+        || !HAS_X_MAX
       #error Missing or invalid definitions for DUAL_X_CARRIAGE mode.
     #endif
     #if X_HOME_DIR != -1 || X2_HOME_DIR != 1
@@ -260,6 +267,10 @@
     #endif
   #endif
 
+  #if HAS_FAN && CONTROLLERFAN_PIN == FAN_PIN
+    #error You cannot set CONTROLLERFAN_PIN equal to FAN_PIN
+  #endif
+
   /**
    * Test required HEATER defines
    */
@@ -278,6 +289,13 @@
   #endif
   #if !HAS_HEATER_0
     #error HEATER_0_PIN not defined for this board
+  #endif
+
+  /**
+   * Warnings for old configurations
+   */
+  #ifdef X_HOME_RETRACT_MM
+    #error [XYZ]_HOME_RETRACT_MM settings have been renamed [XYZ]_HOME_BUMP_MM
   #endif
 
 #endif //SANITYCHECK_H
