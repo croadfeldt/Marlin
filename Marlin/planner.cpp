@@ -60,13 +60,13 @@
 
 #ifdef MESH_BED_LEVELING
   #include "mesh_bed_leveling.h"
-#endif  // MESH_BED_LEVELING
+#endif
 
 //===========================================================================
 //============================= public variables ============================
 //===========================================================================
 
-unsigned long minsegmenttime;
+millis_t minsegmenttime;
 float max_feedrate[NUM_AXIS]; // Max speeds in mm per minute
 float axis_steps_per_unit[NUM_AXIS];
 unsigned long max_acceleration_units_per_sq_second[NUM_AXIS]; // Use M201 to override by software
@@ -87,7 +87,7 @@ unsigned long axis_steps_per_sqr_second[NUM_AXIS];
     0.0, 1.0, 0.0,
     0.0, 0.0, 1.0
   };
-#endif // #ifdef ENABLE_AUTO_BED_LEVELING
+#endif // ENABLE_AUTO_BED_LEVELING
 
 // The current position of the tool in absolute steps
 long position[NUM_AXIS];   //rescaled from extern when axis_steps_per_unit are changed by gcode
@@ -113,9 +113,6 @@ volatile unsigned char block_buffer_tail;           // Index of the block to pro
 //===========================================================================
 //=============================private variables ============================
 //===========================================================================
-#ifdef PREVENT_DANGEROUS_EXTRUDE
-  float extrude_min_temp = EXTRUDE_MINTEMP;
-#endif
 #ifdef XY_FREQUENCY_LIMIT
   // Used for the frequency limit
   #define MAX_FREQ_TIME (1000000.0/XY_FREQUENCY_LIMIT)
@@ -162,8 +159,8 @@ void calculate_trapezoid_for_block(block_t *block, float entry_factor, float exi
   unsigned long final_rate = ceil(block->nominal_rate * exit_factor); // (step/min)
 
   // Limit minimal step rate (Otherwise the timer will overflow.)
-  if (initial_rate < 120) initial_rate = 120;
-  if (final_rate < 120) final_rate = 120;
+  NOLESS(initial_rate, 120);
+  NOLESS(final_rate, 120);
 
   long acceleration = block->acceleration_st;
   int32_t accelerate_steps = ceil(estimate_acceleration_distance(initial_rate, block->nominal_rate, acceleration));
@@ -385,16 +382,18 @@ void plan_init() {
     }
 
     float t = autotemp_min + high * autotemp_factor;
-    if (t < autotemp_min) t = autotemp_min;
-    if (t > autotemp_max) t = autotemp_max;
-    if (oldt > t) t = AUTOTEMP_OLDWEIGHT * oldt + (1 - AUTOTEMP_OLDWEIGHT) * t;
+    t = constrain(t, autotemp_min, autotemp_max);
+    if (oldt > t) {
+      t *= (1 - AUTOTEMP_OLDWEIGHT);
+      t += AUTOTEMP_OLDWEIGHT * oldt;
+    }
     oldt = t;
     setTargetHotend0(t);
   }
 #endif
 
 void check_axes_activity() {
-  unsigned char axis_active[NUM_AXIS],
+  unsigned char axis_active[NUM_AXIS] = { 0 },
                 tail_fan_speed = fanSpeed;
   #ifdef BARICUDA
     unsigned char tail_valve_pressure = ValvePressure,
@@ -429,7 +428,7 @@ void check_axes_activity() {
 
   #if HAS_FAN
     #ifdef FAN_KICKSTART_TIME
-      static unsigned long fan_kick_end;
+      static millis_t fan_kick_end;
       if (tail_fan_speed) {
         if (fan_kick_end == 0) {
           // Just starting up fan - run at full power.
@@ -472,7 +471,7 @@ float junction_deviation = 0.1;
   void plan_buffer_line(float x, float y, float z, const float &e, float feed_rate, const uint8_t &extruder)
 #else
   void plan_buffer_line(const float &x, const float &y, const float &z, const float &e, float feed_rate, const uint8_t &extruder)
-#endif  //ENABLE_AUTO_BED_LEVELING
+#endif  // ENABLE_AUTO_BED_LEVELING
 {
   // Calculate the buffer head after we push this byte
   int next_buffer_head = next_block_index(block_buffer_head);
@@ -487,9 +486,7 @@ float junction_deviation = 0.1;
 
   #ifdef MESH_BED_LEVELING
     if (mbl.active) z += mbl.get_z(x, y);
-  #endif
-
-  #ifdef ENABLE_AUTO_BED_LEVELING
+  #elif defined(ENABLE_AUTO_BED_LEVELING)
     apply_rotation_xyz(plan_bed_level_matrix, x, y, z);
   #endif
 
@@ -509,14 +506,16 @@ float junction_deviation = 0.1;
 
   #ifdef PREVENT_DANGEROUS_EXTRUDE
     if (de) {
-      if (degHotend(active_extruder) < extrude_min_temp) {
-        position[E_AXIS] = target[E_AXIS]; //behave as if the move really took place, but ignore E part
+      if (degHotend(extruder) < extrude_min_temp) {
+        position[E_AXIS] = target[E_AXIS]; // Behave as if the move really took place, but ignore E part
+        de = 0; // no difference
         SERIAL_ECHO_START;
         SERIAL_ECHOLNPGM(MSG_ERR_COLD_EXTRUDE_STOP);
       }
       #ifdef PREVENT_LENGTHY_EXTRUDE
         if (labs(de) > axis_steps_per_unit[E_AXIS] * EXTRUDE_MAXLENGTH) {
           position[E_AXIS] = target[E_AXIS]; // Behave as if the move really took place, but ignore E part
+          de = 0; // no difference
           SERIAL_ECHO_START;
           SERIAL_ECHOLNPGM(MSG_ERR_LONG_EXTRUDE_STOP);
         }
@@ -544,8 +543,8 @@ float junction_deviation = 0.1;
 
   block->steps[Z_AXIS] = labs(dz);
   block->steps[E_AXIS] = labs(de);
-  block->steps[E_AXIS] *= volumetric_multiplier[active_extruder];
-  block->steps[E_AXIS] *= extruder_multiply[active_extruder];
+  block->steps[E_AXIS] *= volumetric_multiplier[extruder];
+  block->steps[E_AXIS] *= extruder_multiply[extruder];
   block->steps[E_AXIS] /= 100;
   block->step_event_count = max(block->steps[X_AXIS], max(block->steps[Y_AXIS], max(block->steps[Z_AXIS], block->steps[E_AXIS])));
 
@@ -654,10 +653,10 @@ float junction_deviation = 0.1;
     }
   }
 
-  if (block->steps[E_AXIS]) {
-    if (feed_rate < minimumfeedrate) feed_rate = minimumfeedrate;
-  }
-  else if (feed_rate < mintravelfeedrate) feed_rate = mintravelfeedrate;
+  if (block->steps[E_AXIS])
+    NOLESS(feed_rate, minimumfeedrate);
+  else
+    NOLESS(feed_rate, mintravelfeedrate);
 
   /**
    * This part of the code calculates the total length of the movement. 
@@ -679,7 +678,7 @@ float junction_deviation = 0.1;
     delta_mm[Y_AXIS] = dy / axis_steps_per_unit[Y_AXIS];
   #endif
   delta_mm[Z_AXIS] = dz / axis_steps_per_unit[Z_AXIS];
-  delta_mm[E_AXIS] = (de / axis_steps_per_unit[E_AXIS]) * volumetric_multiplier[active_extruder] * extruder_multiply[active_extruder] / 100.0;
+  delta_mm[E_AXIS] = (de / axis_steps_per_unit[E_AXIS]) * volumetric_multiplier[extruder] * extruder_multiply[extruder] / 100.0;
 
   if (block->steps[X_AXIS] <= dropsegments && block->steps[Y_AXIS] <= dropsegments && block->steps[Z_AXIS] <= dropsegments) {
     block->millimeters = fabs(delta_mm[E_AXIS]);
@@ -977,10 +976,10 @@ float junction_deviation = 0.1;
   void plan_set_position(const float &x, const float &y, const float &z, const float &e)
 #endif // ENABLE_AUTO_BED_LEVELING || MESH_BED_LEVELING
   {
-    #ifdef ENABLE_AUTO_BED_LEVELING
-      apply_rotation_xyz(plan_bed_level_matrix, x, y, z);
-    #elif defined(MESH_BED_LEVELING)
+    #ifdef MESH_BED_LEVELING
       if (mbl.active) z += mbl.get_z(x, y);
+    #elif defined(ENABLE_AUTO_BED_LEVELING)
+      apply_rotation_xyz(plan_bed_level_matrix, x, y, z);
     #endif
 
     float nx = position[X_AXIS] = lround(x * axis_steps_per_unit[X_AXIS]);
@@ -997,10 +996,6 @@ void plan_set_e_position(const float &e) {
   position[E_AXIS] = lround(e * axis_steps_per_unit[E_AXIS]);  
   st_set_e_position(position[E_AXIS]);
 }
-
-#ifdef PREVENT_DANGEROUS_EXTRUDE
-  void set_extrude_min_temp(float temp) { extrude_min_temp = temp; }
-#endif
 
 // Calculate the steps/s^2 acceleration rates, based on the mm/s^s
 void reset_acceleration_rates() {
